@@ -105,7 +105,7 @@ def main():
 
 def serve(listen, upstream, china_upstream, hosted_domain, hosted_at,
           enable_china_domain, enable_hosted_domain, fallback_timeout,
-          strategy, original_upstream):
+          strategy, original_upstream, dns_bypass=None):
     address = parse_ip_colon_port(listen)
     upstreams = [parse_ip_colon_port(e) for e in upstream]
     china_upstreams = [parse_ip_colon_port(e) for e in china_upstream]
@@ -113,7 +113,7 @@ def serve(listen, upstream, china_upstream, hosted_domain, hosted_at,
         original_upstream = parse_ip_colon_port(original_upstream)
     handler = DnsHandler(
         upstreams, enable_china_domain, china_upstreams, original_upstream,
-        enable_hosted_domain, hosted_domain, hosted_at, fallback_timeout, strategy)
+        enable_hosted_domain, hosted_domain, hosted_at, fallback_timeout, strategy, dns_bypass)
     server = HandlerDatagramServer(address, handler)
     LOGGER.info('dns server started at %r, forwarding to %r', address, upstreams)
     try:
@@ -137,7 +137,7 @@ class DnsHandler(object):
     def __init__(
             self, upstreams=(), enable_china_domain=True, china_upstreams=(), original_upstream=None,
             enable_hosted_domain=True, hosted_domains=(), hosted_at='fqrouter.com',
-            fallback_timeout=None, strategy=None):
+            fallback_timeout=None, strategy=None, dns_bypass=None):
         super(DnsHandler, self).__init__()
         self.upstreams = []
         if upstreams:
@@ -173,7 +173,7 @@ class DnsHandler(object):
         self.hosted_at = hosted_at or 'fqrouter.com'
         self.fallback_timeout = fallback_timeout or 3
         self.strategy = strategy or 'pick-right'
-
+        self.set_dns_bypass(dns_bypass)
 
     def __call__(self, sendto, raw_request, address):
         request = dpkt.dns.DNS(raw_request)
@@ -195,7 +195,7 @@ class DnsHandler(object):
         domain = domains[0]
         response = dpkt.dns.DNS(raw_request)
         response.set_qr(True)
-        if '.' not in domain or domain.endswith('.lan') or domain.endswith('.localdomain'):
+        if '.' not in domain or self.is_bypassed_domain(domain):
             response.set_rcode(dpkt.dns.DNS_RCODE_NXDOMAIN)
             if self.original_upstream:
                 response = query_directly_once(request, self.original_upstream, self.fallback_timeout) or response
@@ -302,6 +302,19 @@ class DnsHandler(object):
             self.china_upstreams.remove(first_upstream)
             self.china_upstreams.append(first_upstream)
 
+    def is_bypassed_domain(self, domain):
+        for i in self.dns_bypass_hosts:
+            if domain.endswith(i):
+                LOGGER.info('domain %s bypassed with the rule %s' %(domain, i))
+                return True
+        return False
+
+    def set_dns_bypass(self, dns_bypass):
+        if dns_bypass:
+            self.dns_bypass_hosts = dns_bypass.replace(' ', '').split(',')
+            # LOGGER.info('dns_bypass set to %s' %(dns_bypass))
+        else:
+            self.dns_bypass_hosts = []
 
 def pick_three(full_list):
     return random.sample(full_list, min(len(full_list), 3))
