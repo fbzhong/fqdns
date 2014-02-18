@@ -166,13 +166,13 @@ class DnsHandler(object):
                 self.china_upstreams.append(('udp', '114.114.115.115', 53))
                 self.china_upstreams.append(('udp', '199.91.73.222', 3389))
                 self.china_upstreams.append(('udp', '101.226.4.6', 53))
-        self.original_upstream = original_upstream
         self.failed_times = {}
         self.enable_hosted_domain = enable_hosted_domain
         self.not_hosted_domains = set()
         self.hosted_at = hosted_at or 'fqrouter.com'
         self.fallback_timeout = fallback_timeout or 3
         self.strategy = strategy or 'pick-right'
+        self.set_original_upstream(original_upstream)
         self.set_dns_bypass(dns_bypass)
 
     def __call__(self, sendto, raw_request, address):
@@ -308,6 +308,13 @@ class DnsHandler(object):
                 LOGGER.info('domain %s bypassed with the rule %s' %(domain, i))
                 return True
         return False
+
+    def set_original_upstream(self, original_upstream):
+        if type(original_upstream) == str:
+            server_ip, server_port = parse_ip_colon_port(original_upstream)
+            original_upstream = ('udp', server_ip, server_port)
+        self.original_upstream = original_upstream
+        LOGGER.info('dns original_upstream set to %s' % (str(original_upstream)))
 
     def set_dns_bypass(self, dns_bypass):
         if dns_bypass:
